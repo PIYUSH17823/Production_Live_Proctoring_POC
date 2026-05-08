@@ -30,7 +30,19 @@ export interface FramePayload {
   gaze_zone: GazeZone;
   head_pose: HeadPose;
   face_visible: boolean;
+  fps: number;
   audio_level: number;
   vad_speech: boolean;
   objects: string[];
+}
+
+export interface SyncRequest {
+  session_id: string;
+  frames: FramePayload[];
+}
+
+export interface SyncResponse {
+  session_id: string;
+  received_count: number;
+  echoed_frames: FramePayload[];
 }

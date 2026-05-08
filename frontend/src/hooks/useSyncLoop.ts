@@ -13,6 +13,7 @@ export const useSyncLoop = (
   const [totalSynced, setTotalSynced] = useState(0);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
   const isSyncingRef = useRef(false);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export const useSyncLoop = (
         frameBufferRef.current.splice(0, batch.length);
         setLastSyncCount(data.received_count);
         setTotalSynced((count) => count + data.received_count);
+        setConfidence(data.confidence);
         setSyncStatus('ok');
         setLastError(null);
       } catch (err: unknown) {
@@ -66,5 +68,6 @@ export const useSyncLoop = (
     totalSynced,
     syncStatus,
     lastError,
+    confidence,
   };
 };

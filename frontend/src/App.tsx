@@ -8,6 +8,7 @@ import { useSyncLoop } from './hooks/useSyncLoop';
 
 import AudioBar from './components/AudioBar';
 import CameraPermission from './components/CameraPermission';
+import SignalQualityBadge from './components/SignalQualityBadge';
 import type { FaceLandmark, GazeZone } from './types';
 
 const ZONE_COLORS: Record<GazeZone, string> = {
@@ -43,11 +44,8 @@ function App() {
       fps,
       audioData,
     });
-  const { lastSyncCount, totalSynced, syncStatus, lastError } = useSyncLoop(
-    isActive,
-    SESSION_ID,
-    frameBufferRef,
-  );
+  const { lastSyncCount, totalSynced, syncStatus, lastError, confidence } =
+    useSyncLoop(isActive, SESSION_ID, frameBufferRef);
 
   const handleGranted = async () => {
     await requestAccess();
@@ -136,6 +134,10 @@ function App() {
 
           <div style={styles.divider} />
 
+          <SignalQualityBadge confidence={confidence} />
+
+          <div style={styles.divider} />
+
           <div style={styles.statusRow}>
             <StatusDot label="Camera" ok={permission === 'granted'} />
             <StatusDot label="Microphone" ok={micPermission === 'granted'} />
@@ -162,6 +164,12 @@ function App() {
           <div style={styles.row}>
             <span style={styles.rowLabel}>Total Synced</span>
             <span style={styles.rowValue}>{totalSynced}</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Confidence</span>
+            <span style={styles.rowValue}>
+              {confidence === null ? '--' : `${confidence.toFixed(1)}%`}
+            </span>
           </div>
           <div style={styles.row}>
             <span style={styles.rowLabel}>Sync Status</span>

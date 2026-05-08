@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.services.confidence import calculate_confidence
+
 app = FastAPI(title="PIE v2 Proctoring API")
 
 app.add_middleware(
@@ -46,6 +48,7 @@ class SyncRequest(BaseModel):
 class SyncResponse(BaseModel):
     session_id: str
     received_count: int
+    confidence: float
     echoed_frames: list[FramePayload]
 
 
@@ -56,8 +59,25 @@ def health() -> dict[str, str]:
 
 @app.post("/api/sync", response_model=SyncResponse)
 def sync(payload: SyncRequest) -> SyncResponse:
+    frame_count = len(payload.frames)
+    avg_fps = (
+        sum(frame.fps for frame in payload.frames) / frame_count
+        if frame_count
+        else 0.0
+    )
+    visibility_ratio = (
+        sum(1 for frame in payload.frames if frame.face_visible) / frame_count
+        if frame_count
+        else 0.0
+    )
+    confidence = calculate_confidence(
+        avg_fps=avg_fps,
+        visibility_ratio=visibility_ratio,
+    )
+
     return SyncResponse(
         session_id=payload.session_id,
-        received_count=len(payload.frames),
+        received_count=frame_count,
+        confidence=confidence,
         echoed_frames=payload.frames,
     )

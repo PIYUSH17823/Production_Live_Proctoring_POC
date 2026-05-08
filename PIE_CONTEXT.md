@@ -100,6 +100,8 @@ The system should:
 | 5 | frontend/src/hooks/usePIE.ts | L02 | Hook | ✅ Created | Sync pipeline + audio monitoring |
 | 6 | frontend/src/hooks/useInference.ts | L01 | Hook | ✅ Created | FaceMesh + COCO-SSD inference |
 | 7 | backend/app/main.py | L02 | API | ✅ Created | FastAPI entry point + /sync route |
+| 8 | frontend/src/components/TestDashboard.tsx | L00 | UI | ✅ Created | Foundation verification dashboard |
+| 9 | frontend/vite.config.ts | L00 | CFG | ✅ Created | Vite configuration |
 
 ---
 
@@ -233,6 +235,7 @@ The system should:
 | Step | Research Finding | Impact |
 |-----|------------------|--------|
 | R-1 | Static gaze calibration caused corner drift | Added moving-ball interpolation |
+| R-2 | MediaPipe WASM aborts on HMR re-render | Implemented singleton ref pattern |
 
 ---
 
@@ -248,6 +251,9 @@ The system should:
 | Step-5 | CREATE | frontend/src/hooks/usePIE.ts | L02 | Added sync pipeline hook |
 | Step-6 | CREATE | frontend/src/hooks/useInference.ts | L01 | Added inference hook (L01 foundation) |
 | Step-7 | CREATE | backend/app/main.py | L02 | Added FastAPI sync entry point |
+| Step-8 | CREATE | - | L00 | Added verification UI infrastructure |
+| Step-9 | MODIFY | useInference.ts | L01 | Implemented CDN Singleton pattern |
+| Step-10| CREATE | tsconfig.json | L00 | Added Vite client types |
 
 ---
 

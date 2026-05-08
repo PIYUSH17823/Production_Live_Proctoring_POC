@@ -35,3 +35,14 @@ export interface FramePayload {
   vad_speech: boolean;
   objects: string[];
 }
+
+export interface SyncRequest {
+  session_id: string;
+  frames: FramePayload[];
+}
+
+export interface SyncResponse {
+  session_id: string;
+  received_count: number;
+  echoed_frames: FramePayload[];
+}

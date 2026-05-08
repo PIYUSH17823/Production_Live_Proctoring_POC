@@ -44,7 +44,14 @@ function App() {
       fps,
       audioData,
     });
-  const { lastSyncCount, totalSynced, syncStatus, lastError, confidence } =
+  const {
+    lastSyncCount,
+    totalSynced,
+    syncStatus,
+    lastError,
+    confidence,
+    retryCount,
+  } =
     useSyncLoop(isActive, SESSION_ID, frameBufferRef);
 
   const handleGranted = async () => {
@@ -181,6 +188,16 @@ function App() {
               title={lastError ?? undefined}
             >
               {syncStatus.toUpperCase()}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Reconnects</span>
+            <span style={styles.rowValue}>{retryCount}</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Session</span>
+            <span style={{ ...styles.rowValue, fontSize: 10 }}>
+              {SESSION_ID.slice(0, 18)}
             </span>
           </div>
         </div>

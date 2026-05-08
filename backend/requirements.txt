@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+numpy
+scipy
+motor
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+python-dotenv
+deepface
+tf-keras
+opencv-python-headless

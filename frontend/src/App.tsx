@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { isBrowserSupported, useCamera } from './hooks/useCamera';
 import { useAudio } from './hooks/useAudio';
+import { useFrameBuffer } from './hooks/useFrameBuffer';
 import { useInference } from './hooks/useInference';
 
 import AudioBar from './components/AudioBar';
@@ -33,6 +34,14 @@ function App() {
     useCamera();
   const { gazeData, fps, landmarks } = useInference(videoRef, isActive);
   const { audioData } = useAudio(isActive, mediaStream);
+  const { bufferSize, collectedCount, maxBufferSize } = useFrameBuffer(
+    isActive,
+    {
+      gazeData,
+      fps,
+      audioData,
+    },
+  );
 
   const handleGranted = async () => {
     await requestAccess();
@@ -126,6 +135,19 @@ function App() {
             <StatusDot label="Microphone" ok={micPermission === 'granted'} />
             <StatusDot label="FaceMesh" ok={fps > 0} />
             <StatusDot label="Landmarks" ok={landmarks.length >= 468} />
+          </div>
+
+          <div style={styles.divider} />
+
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Frame Buffer</span>
+            <span style={styles.rowValue}>
+              {bufferSize}/{maxBufferSize}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Collected</span>
+            <span style={styles.rowValue}>{collectedCount}</span>
           </div>
         </div>
       </main>

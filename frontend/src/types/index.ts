@@ -30,6 +30,7 @@ export interface FramePayload {
   gaze_zone: GazeZone;
   head_pose: HeadPose;
   face_visible: boolean;
+  fps: number;
   audio_level: number;
   vad_speech: boolean;
   objects: string[];

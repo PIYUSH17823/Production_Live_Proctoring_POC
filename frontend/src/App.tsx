@@ -29,7 +29,10 @@ const ZONE_TEXT: Record<GazeZone, string> = {
   MISSING: '#991b1b',
 };
 
-const SESSION_ID = `session-${crypto.randomUUID()}`;
+// App.tsx — line 1
+const SESSION_ID = 
+  new URLSearchParams(window.location.search).get('session_id') 
+  ?? `session-${crypto.randomUUID()}`;
 
 function App() {
   const [isActive, setIsActive] = useState(false);
@@ -44,7 +47,14 @@ function App() {
       fps,
       audioData,
     });
-  const { lastSyncCount, totalSynced, syncStatus, lastError, confidence } =
+  const {
+    lastSyncCount,
+    totalSynced,
+    syncStatus,
+    lastError,
+    confidence,
+    retryCount,
+  } =
     useSyncLoop(isActive, SESSION_ID, frameBufferRef);
 
   const handleGranted = async () => {
@@ -181,6 +191,16 @@ function App() {
               title={lastError ?? undefined}
             >
               {syncStatus.toUpperCase()}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Reconnects</span>
+            <span style={styles.rowValue}>{retryCount}</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Session</span>
+            <span style={{ ...styles.rowValue, fontSize: 10 }}>
+              {SESSION_ID.slice(0, 18)}
             </span>
           </div>
         </div>

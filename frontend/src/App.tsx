@@ -29,10 +29,10 @@ const ZONE_TEXT: Record<GazeZone, string> = {
   MISSING: '#991b1b',
 };
 
-// App.tsx — line 1
-const SESSION_ID = 
-  new URLSearchParams(window.location.search).get('session_id') 
-  ?? `session-${crypto.randomUUID()}`;
+const searchParams = new URLSearchParams(window.location.search);
+const SESSION_ID =
+  searchParams.get('session_id') ?? `session-${crypto.randomUUID()}`;
+const PROCTORING_TOKEN = searchParams.get('token');
 
 function App() {
   const [isActive, setIsActive] = useState(false);
@@ -201,6 +201,12 @@ function App() {
             <span style={styles.rowLabel}>Session</span>
             <span style={{ ...styles.rowValue, fontSize: 10 }}>
               {SESSION_ID.slice(0, 18)}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Token</span>
+            <span style={{ ...styles.rowValue, fontSize: 10 }}>
+              {PROCTORING_TOKEN ? 'present' : 'dev generated'}
             </span>
           </div>
         </div>

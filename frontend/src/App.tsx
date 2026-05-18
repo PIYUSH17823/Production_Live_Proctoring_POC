@@ -7,9 +7,10 @@ import { useInference } from './hooks/useInference';
 import { useSyncLoop } from './hooks/useSyncLoop';
 
 import AudioBar from './components/AudioBar';
+import CalibrationOverlay from './components/CalibrationOverlay';
 import CameraPermission from './components/CameraPermission';
 import SignalQualityBadge from './components/SignalQualityBadge';
-import type { FaceLandmark, GazeZone } from './types';
+import type { CalibrationPointSample, FaceLandmark, GazeZone } from './types';
 
 const ZONE_COLORS: Record<GazeZone, string> = {
   CENTER: '#d1fae5',
@@ -36,13 +37,21 @@ const PROCTORING_TOKEN = searchParams.get('token');
 
 function App() {
   const [isActive, setIsActive] = useState(false);
+  const [calibrationSamples, setCalibrationSamples] = useState<
+    CalibrationPointSample[]
+  >([]);
+  const isCalibrating = isActive && calibrationSamples.length === 0;
+  const isProctoringActive = isActive && calibrationSamples.length > 0;
 
   const { permission, micPermission, mediaStream, videoRef, requestAccess } =
     useCamera();
-  const { gazeData, fps, landmarks } = useInference(videoRef, isActive);
-  const { audioData } = useAudio(isActive, mediaStream);
+  const { gazeData, fps, landmarks, latestPoseRef } = useInference(
+    videoRef,
+    isActive,
+  );
+  const { audioData } = useAudio(isProctoringActive, mediaStream);
   const { frameBufferRef, bufferSize, collectedCount, maxBufferSize } =
-    useFrameBuffer(isActive, {
+    useFrameBuffer(isProctoringActive, {
       gazeData,
       fps,
       audioData,
@@ -55,7 +64,7 @@ function App() {
     confidence,
     retryCount,
   } =
-    useSyncLoop(isActive, SESSION_ID, frameBufferRef);
+    useSyncLoop(isProctoringActive, SESSION_ID, frameBufferRef);
 
   const handleGranted = async () => {
     await requestAccess();
@@ -74,6 +83,11 @@ function App() {
 
   return (
     <div style={styles.page}>
+      <CalibrationOverlay
+        isActive={isCalibrating}
+        latestPoseRef={latestPoseRef}
+        onComplete={setCalibrationSamples}
+      />
       <nav style={styles.nav}>
         <div style={styles.navBrand}>
           <div style={styles.navIcon}>PIE</div>
@@ -153,6 +167,23 @@ function App() {
             <StatusDot label="Microphone" ok={micPermission === 'granted'} />
             <StatusDot label="FaceMesh" ok={fps > 0} />
             <StatusDot label="Landmarks" ok={landmarks.length >= 468} />
+          </div>
+
+          <div style={styles.divider} />
+
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Calibration</span>
+            <span style={styles.rowValue}>
+              {calibrationSamples.length === 0 ? 'RUNNING' : 'DONE'}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Samples</span>
+            <span style={styles.rowValue}>
+              {calibrationSamples.length === 0
+                ? '--'
+                : `${calibrationSamples.length} medians`}
+            </span>
           </div>
 
           <div style={styles.divider} />

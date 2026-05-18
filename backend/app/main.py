@@ -133,7 +133,6 @@ def sync(payload: SyncRequest) -> SyncResponse:
         session_id=session.session_id,
         received_count=frame_count,
         confidence=confidence,
-        echoed_frames=payload.frames,
     )
 
 
@@ -143,7 +142,7 @@ def session_start(body: SessionStartRequest) -> SessionStartResponse:
     get_or_create_session(session_id)
     return SessionStartResponse(
         session_id=session_id,
-        iframe_url=f"https://your-vercel-url.vercel.app?session_id={session_id}"
+        iframe_url=f"https://production-live-proct-git-b68f3b-piyush9-skilljourneys-projects.vercel.app/?session_id={session_id}"
     )
 
 @app.get("/api/admin/sessions", response_model=AdminSessionsResponse)

@@ -130,9 +130,9 @@ const CalibrationOverlay: React.FC<Props> = ({
                 const nextIndex = index + 1;
 
                 if (nextIndex >= POINTS.length) {
-                setPhase('tracking');
-                return index;
-              }
+                  setPhase('tracking');
+                  return index;
+                }
 
                 return nextIndex;
               });

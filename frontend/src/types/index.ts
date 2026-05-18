@@ -14,6 +14,36 @@ export interface GazeData {
   pose: HeadPose;
 }
 
+export type CalibrationPointId =
+  | 'top_left'
+  | 'top_right'
+  | 'bottom_right'
+  | 'bottom_left'
+  | 'center';
+
+export interface CalibrationPointSample {
+  point: CalibrationPointId;
+  yaw: number;
+  pitch: number;
+}
+
+export interface CalibrationTrackingSample {
+  timestamp: number;
+  targetX: number;
+  targetY: number;
+  yaw: number;
+  pitch: number;
+}
+
+export interface CalibrationMap {
+  centerYaw: number;
+  centerPitch: number;
+  yawRange: number;
+  pitchRange: number;
+  pointSamples: CalibrationPointSample[];
+  trackingSamples: CalibrationTrackingSample[];
+}
+
 export interface AudioData {
   level: number;
   isSpeaking: boolean;

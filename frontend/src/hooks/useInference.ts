@@ -35,6 +35,7 @@ export const useInference = (
     zone: 'CENTER',
     pose: { yaw: 0, pitch: 0 },
   });
+  const latestPoseRef = useRef({ yaw: 0, pitch: 0 });
   const [fps, setFps] = useState(0);
   const [landmarks, setLandmarks] = useState<FaceLandmark[]>([]);
   const faceMeshRef = useRef<FaceMeshInstance | null>(null);
@@ -122,6 +123,7 @@ export const useInference = (
         `[Gaze] zone=${zone} yaw=${rawYaw.toFixed(1)} pitch=${rawPitch.toFixed(1)}`,
       );
 
+      latestPoseRef.current = { yaw: rawYaw, pitch: rawPitch };
       setGazeData({ zone, pose: { yaw: rawYaw, pitch: rawPitch } });
     });
 
@@ -170,7 +172,7 @@ export const useInference = (
     };
   }, [isActive, classifyZone, videoRef]);
 
-  return { gazeData, fps, landmarks };
+  return { gazeData, fps, landmarks, latestPoseRef };
 };
 
 declare global {

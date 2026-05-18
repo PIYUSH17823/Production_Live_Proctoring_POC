@@ -7,9 +7,10 @@ import { useInference } from './hooks/useInference';
 import { useSyncLoop } from './hooks/useSyncLoop';
 
 import AudioBar from './components/AudioBar';
+import CalibrationOverlay from './components/CalibrationOverlay';
 import CameraPermission from './components/CameraPermission';
 import SignalQualityBadge from './components/SignalQualityBadge';
-import type { FaceLandmark, GazeZone } from './types';
+import type { CalibrationMap, FaceLandmark, GazeZone } from './types';
 
 const ZONE_COLORS: Record<GazeZone, string> = {
   CENTER: '#d1fae5',
@@ -36,13 +37,23 @@ const PROCTORING_TOKEN = searchParams.get('token');
 
 function App() {
   const [isActive, setIsActive] = useState(false);
+  const [isFullscreenReady, setIsFullscreenReady] = useState(false);
+  const [calibrationMap, setCalibrationMap] = useState<CalibrationMap | null>(
+    null,
+  );
+  const isCalibrating =
+    isActive && isFullscreenReady && calibrationMap === null;
+  const isProctoringActive = isActive && calibrationMap !== null;
 
   const { permission, micPermission, mediaStream, videoRef, requestAccess } =
     useCamera();
-  const { gazeData, fps, landmarks } = useInference(videoRef, isActive);
-  const { audioData } = useAudio(isActive, mediaStream);
+  const { gazeData, fps, landmarks, latestPoseRef } = useInference(
+    videoRef,
+    isActive,
+  );
+  const { audioData } = useAudio(isProctoringActive, mediaStream);
   const { frameBufferRef, bufferSize, collectedCount, maxBufferSize } =
-    useFrameBuffer(isActive, {
+    useFrameBuffer(isProctoringActive, {
       gazeData,
       fps,
       audioData,
@@ -55,11 +66,33 @@ function App() {
     confidence,
     retryCount,
   } =
-    useSyncLoop(isActive, SESSION_ID, frameBufferRef);
+    useSyncLoop(isProctoringActive, SESSION_ID, frameBufferRef);
 
   const handleGranted = async () => {
     await requestAccess();
     setIsActive(true);
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreenReady(document.fullscreenElement !== null);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const handleEnterFullscreen = async () => {
+    try {
+      await document.documentElement.requestFullscreen();
+      setIsFullscreenReady(true);
+    } catch (err: unknown) {
+      console.error('[Fullscreen] request failed:', err);
+      setIsFullscreenReady(true);
+    }
   };
 
   if (!isBrowserSupported() || permission !== 'granted') {
@@ -74,6 +107,14 @@ function App() {
 
   return (
     <div style={styles.page}>
+      {isActive && !isFullscreenReady && (
+        <FullscreenGate onStart={handleEnterFullscreen} />
+      )}
+      <CalibrationOverlay
+        isActive={isCalibrating}
+        latestPoseRef={latestPoseRef}
+        onComplete={setCalibrationMap}
+      />
       <nav style={styles.nav}>
         <div style={styles.navBrand}>
           <div style={styles.navIcon}>PIE</div>
@@ -153,6 +194,47 @@ function App() {
             <StatusDot label="Microphone" ok={micPermission === 'granted'} />
             <StatusDot label="FaceMesh" ok={fps > 0} />
             <StatusDot label="Landmarks" ok={landmarks.length >= 468} />
+          </div>
+
+          <div style={styles.divider} />
+
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Calibration</span>
+            <span style={styles.rowValue}>
+              {calibrationMap === null ? 'RUNNING' : 'DONE'}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Point Samples</span>
+            <span style={styles.rowValue}>
+              {calibrationMap === null
+                ? '--'
+                : `${calibrationMap.pointSamples.length} medians`}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Tracking</span>
+            <span style={styles.rowValue}>
+              {calibrationMap === null
+                ? '--'
+                : `${calibrationMap.trackingSamples.length} samples`}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Center</span>
+            <span style={styles.rowValue}>
+              {calibrationMap === null
+                ? '--'
+                : `${calibrationMap.centerYaw}/${calibrationMap.centerPitch}`}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.rowLabel}>Range</span>
+            <span style={styles.rowValue}>
+              {calibrationMap === null
+                ? '--'
+                : `${calibrationMap.yawRange}/${calibrationMap.pitchRange}`}
+            </span>
           </div>
 
           <div style={styles.divider} />
@@ -267,11 +349,70 @@ const StatusDot = ({ label, ok }: { label: string; ok: boolean }) => (
   </div>
 );
 
+const FullscreenGate = ({ onStart }: { onStart: () => void }) => (
+  <div style={styles.fullscreenGate}>
+    <div style={styles.fullscreenPanel}>
+      <div style={styles.fullscreenTitle}>Enter Full Screen</div>
+      <div style={styles.fullscreenCopy}>
+        Calibration uses the corners of your exam screen. Please enter full
+        screen before following the calibration dot.
+      </div>
+      <button type="button" style={styles.fullscreenButton} onClick={onStart}>
+        Start Calibration
+      </button>
+    </div>
+  </div>
+);
+
 const styles = {
   page: {
     minHeight: '100vh',
     background: '#f8fafc',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  } as React.CSSProperties,
+
+  fullscreenGate: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 1100,
+    display: 'grid',
+    placeItems: 'center',
+    background: '#0f172a',
+    padding: 24,
+  } as React.CSSProperties,
+
+  fullscreenPanel: {
+    width: 'min(420px, 100%)',
+    background: '#ffffff',
+    borderRadius: 8,
+    border: '1px solid #e2e8f0',
+    padding: 24,
+    textAlign: 'center' as const,
+  } as React.CSSProperties,
+
+  fullscreenTitle: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: '#0f172a',
+  } as React.CSSProperties,
+
+  fullscreenCopy: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 1.5,
+    color: '#475569',
+  } as React.CSSProperties,
+
+  fullscreenButton: {
+    marginTop: 18,
+    width: '100%',
+    border: 0,
+    borderRadius: 8,
+    padding: '12px 16px',
+    background: '#0f172a',
+    color: '#ffffff',
+    fontWeight: 800,
+    cursor: 'pointer',
   } as React.CSSProperties,
 
   nav: {

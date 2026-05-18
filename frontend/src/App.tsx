@@ -50,6 +50,7 @@ function App() {
   const { gazeData, fps, landmarks, latestPoseRef } = useInference(
     videoRef,
     isActive,
+    calibrationMap,
   );
   const { audioData } = useAudio(isProctoringActive, mediaStream);
   const { frameBufferRef, bufferSize, collectedCount, maxBufferSize } =
@@ -156,13 +157,13 @@ function App() {
           <div style={styles.panelTitle}>Live Signals</div>
 
           <div style={styles.row}>
-            <span style={styles.rowLabel}>Yaw</span>
+            <span style={styles.rowLabel}>Calibrated Yaw</span>
             <span style={styles.rowValue}>
               {gazeData.pose.yaw.toFixed(1)} deg
             </span>
           </div>
           <div style={styles.row}>
-            <span style={styles.rowLabel}>Pitch</span>
+            <span style={styles.rowLabel}>Calibrated Pitch</span>
             <span style={styles.rowValue}>
               {gazeData.pose.pitch.toFixed(1)} deg
             </span>

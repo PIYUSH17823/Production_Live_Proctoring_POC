@@ -27,6 +27,23 @@ export interface CalibrationPointSample {
   pitch: number;
 }
 
+export interface CalibrationTrackingSample {
+  timestamp: number;
+  targetX: number;
+  targetY: number;
+  yaw: number;
+  pitch: number;
+}
+
+export interface CalibrationMap {
+  centerYaw: number;
+  centerPitch: number;
+  yawRange: number;
+  pitchRange: number;
+  pointSamples: CalibrationPointSample[];
+  trackingSamples: CalibrationTrackingSample[];
+}
+
 export interface AudioData {
   level: number;
   isSpeaking: boolean;

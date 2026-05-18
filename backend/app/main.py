@@ -80,6 +80,15 @@ class AdminSessionsResponse(BaseModel):
     sessions: list[AdminSessionSummary]
 
 
+class SessionStartRequest(BaseModel):
+    pass
+
+
+class SessionStartResponse(BaseModel):
+    session_id: str
+    iframe_url: str
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

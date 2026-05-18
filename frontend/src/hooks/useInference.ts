@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FaceLandmark, GazeData, GazeZone } from '../types';
+import type { CalibrationMap, FaceLandmark, GazeData, GazeZone } from '../types';
 
-const YAW_THRESHOLD = 35;
-const PITCH_UP_THRESHOLD = 20;
-const PITCH_DOWN_THRESHOLD = -15;
-const DEFAULT_CALIBRATION_OFFSET = { yaw: 0, pitch: 0 };
+const DEFAULT_YAW_THRESHOLD = 35;
+const DEFAULT_PITCH_THRESHOLD = 20;
+const MIN_YAW_THRESHOLD = 12;
+const MIN_PITCH_THRESHOLD = 10;
+const RANGE_THRESHOLD_RATIO = 0.32;
 
 interface FaceMeshResults {
   multiFaceLandmarks?: FaceLandmark[][];
@@ -29,7 +30,7 @@ interface FaceMeshConstructor {
 export const useInference = (
   videoRef: React.RefObject<HTMLVideoElement | null>,
   isActive: boolean,
-  calibrationOffset: { yaw: number; pitch: number } = DEFAULT_CALIBRATION_OFFSET,
+  calibrationMap: CalibrationMap | null = null,
 ) => {
   const [gazeData, setGazeData] = useState<GazeData>({
     zone: 'CENTER',
@@ -44,16 +45,25 @@ export const useInference = (
 
   const classifyZone = useCallback(
     (rawYaw: number, rawPitch: number): GazeZone => {
-      const yaw = rawYaw - calibrationOffset.yaw;
-      const pitch = rawPitch - calibrationOffset.pitch;
+      const yaw = rawYaw - (calibrationMap?.centerYaw ?? 0);
+      const pitch = rawPitch - (calibrationMap?.centerPitch ?? 0);
+      const yawThreshold = calibrationMap
+        ? Math.max(calibrationMap.yawRange * RANGE_THRESHOLD_RATIO, MIN_YAW_THRESHOLD)
+        : DEFAULT_YAW_THRESHOLD;
+      const pitchThreshold = calibrationMap
+        ? Math.max(
+            calibrationMap.pitchRange * RANGE_THRESHOLD_RATIO,
+            MIN_PITCH_THRESHOLD,
+          )
+        : DEFAULT_PITCH_THRESHOLD;
 
-      if (yaw > YAW_THRESHOLD) return 'RIGHT';
-      if (yaw < -YAW_THRESHOLD) return 'LEFT';
-      if (pitch > PITCH_UP_THRESHOLD) return 'UP';
-      if (pitch < PITCH_DOWN_THRESHOLD) return 'DOWN';
+      if (yaw > yawThreshold) return 'RIGHT';
+      if (yaw < -yawThreshold) return 'LEFT';
+      if (pitch > pitchThreshold) return 'UP';
+      if (pitch < -pitchThreshold) return 'DOWN';
       return 'CENTER';
     },
-    [calibrationOffset],
+    [calibrationMap],
   );
 
   useEffect(() => {
@@ -124,7 +134,13 @@ export const useInference = (
       );
 
       latestPoseRef.current = { yaw: rawYaw, pitch: rawPitch };
-      setGazeData({ zone, pose: { yaw: rawYaw, pitch: rawPitch } });
+      setGazeData({
+        zone,
+        pose: {
+          yaw: rawYaw - (calibrationMap?.centerYaw ?? 0),
+          pitch: rawPitch - (calibrationMap?.centerPitch ?? 0),
+        },
+      });
     });
 
     faceMeshRef.current = fm;

@@ -34,15 +34,42 @@ const searchParams = new URLSearchParams(window.location.search);
 const SESSION_ID =
   searchParams.get('session_id') ?? `session-${crypto.randomUUID()}`;
 const PROCTORING_TOKEN = searchParams.get('token');
+const IS_DEV_MODE = searchParams.get('dev') === '1';
+
+const DEV_CALIBRATION_MAP: CalibrationMap = {
+  centerYaw: 0,
+  centerPitch: 0,
+  yawRange: 100,
+  pitchRange: 80,
+  pointSamples: [],
+  trackingSamples: [],
+};
+const CENTERING_YAW_LIMIT = 15;
+const CENTERING_PITCH_LIMIT = 12;
 
 function App() {
   const [isActive, setIsActive] = useState(false);
+  const [isInstructionAccepted, setIsInstructionAccepted] = useState(false);
   const [isFullscreenReady, setIsFullscreenReady] = useState(false);
+  const [isFaceCentered, setIsFaceCentered] = useState(false);
   const [calibrationMap, setCalibrationMap] = useState<CalibrationMap | null>(
     null,
   );
+  const shouldShowInstructions = isActive && !isInstructionAccepted;
+  const shouldShowFullscreenGate =
+    isActive && isInstructionAccepted && !isFullscreenReady;
+  const shouldShowCenteringGate =
+    isActive &&
+    isInstructionAccepted &&
+    isFullscreenReady &&
+    calibrationMap === null &&
+    !isFaceCentered;
   const isCalibrating =
-    isActive && isFullscreenReady && calibrationMap === null;
+    isActive &&
+    isInstructionAccepted &&
+    isFullscreenReady &&
+    isFaceCentered &&
+    calibrationMap === null;
   const isProctoringActive = isActive && calibrationMap !== null;
 
   const { permission, micPermission, mediaStream, videoRef, requestAccess } =
@@ -50,7 +77,12 @@ function App() {
   const { gazeData, fps, landmarks, latestPoseRef } = useInference(
     videoRef,
     isActive,
+    calibrationMap,
   );
+  const isFaceReady =
+    landmarks.length >= 468 &&
+    Math.abs(latestPoseRef.current.yaw) <= CENTERING_YAW_LIMIT &&
+    Math.abs(latestPoseRef.current.pitch) <= CENTERING_PITCH_LIMIT;
   const { audioData } = useAudio(isProctoringActive, mediaStream);
   const { frameBufferRef, bufferSize, collectedCount, maxBufferSize } =
     useFrameBuffer(isProctoringActive, {
@@ -95,6 +127,12 @@ function App() {
     }
   };
 
+  const handleSkipCalibration = () => {
+    setIsInstructionAccepted(true);
+    setIsFullscreenReady(true);
+    setCalibrationMap(DEV_CALIBRATION_MAP);
+  };
+
   if (!isBrowserSupported() || permission !== 'granted') {
     return (
       <CameraPermission
@@ -107,8 +145,18 @@ function App() {
 
   return (
     <div style={styles.page}>
-      {isActive && !isFullscreenReady && (
+      {shouldShowInstructions && (
+        <InstructionGate
+          isDevMode={IS_DEV_MODE}
+          onContinue={() => setIsInstructionAccepted(true)}
+          onSkip={handleSkipCalibration}
+        />
+      )}
+      {shouldShowFullscreenGate && (
         <FullscreenGate onStart={handleEnterFullscreen} />
+      )}
+      {shouldShowCenteringGate && (
+        <FaceCenteringGate isReady={isFaceReady} onStart={() => setIsFaceCentered(true)} />
       )}
       <CalibrationOverlay
         isActive={isCalibrating}
@@ -156,13 +204,13 @@ function App() {
           <div style={styles.panelTitle}>Live Signals</div>
 
           <div style={styles.row}>
-            <span style={styles.rowLabel}>Yaw</span>
+            <span style={styles.rowLabel}>Calibrated Yaw</span>
             <span style={styles.rowValue}>
               {gazeData.pose.yaw.toFixed(1)} deg
             </span>
           </div>
           <div style={styles.row}>
-            <span style={styles.rowLabel}>Pitch</span>
+            <span style={styles.rowLabel}>Calibrated Pitch</span>
             <span style={styles.rowValue}>
               {gazeData.pose.pitch.toFixed(1)} deg
             </span>
@@ -349,6 +397,35 @@ const StatusDot = ({ label, ok }: { label: string; ok: boolean }) => (
   </div>
 );
 
+const InstructionGate = ({
+  isDevMode,
+  onContinue,
+  onSkip,
+}: {
+  isDevMode: boolean;
+  onContinue: () => void;
+  onSkip: () => void;
+}) => (
+  <div style={styles.fullscreenGate}>
+    <div style={styles.fullscreenPanel}>
+      <div style={styles.fullscreenTitle}>Prepare for Calibration</div>
+      <div style={styles.fullscreenCopy}>
+        Sit comfortably, keep your face visible, and follow the dot with your
+        eyes. The next step will switch to full screen so PIE can learn your
+        screen boundaries.
+      </div>
+      <button type="button" style={styles.fullscreenButton} onClick={onContinue}>
+        Continue
+      </button>
+      {isDevMode && (
+        <button type="button" style={styles.skipButton} onClick={onSkip}>
+          Skip Calibration
+        </button>
+      )}
+    </div>
+  </div>
+);
+
 const FullscreenGate = ({ onStart }: { onStart: () => void }) => (
   <div style={styles.fullscreenGate}>
     <div style={styles.fullscreenPanel}>
@@ -359,6 +436,45 @@ const FullscreenGate = ({ onStart }: { onStart: () => void }) => (
       </div>
       <button type="button" style={styles.fullscreenButton} onClick={onStart}>
         Start Calibration
+      </button>
+    </div>
+  </div>
+);
+
+const FaceCenteringGate = ({
+  isReady,
+  onStart,
+}: {
+  isReady: boolean;
+  onStart: () => void;
+}) => (
+  <div style={styles.fullscreenGate}>
+    <div style={styles.fullscreenPanel}>
+      <div style={styles.fullscreenTitle}>Center Your Face</div>
+      <div style={styles.fullscreenCopy}>
+        Sit straight, keep your face visible, and look at the center of the
+        screen. Calibration will start once your face is centered.
+      </div>
+      <div
+        style={{
+          ...styles.centerStatus,
+          color: isReady ? '#065f46' : '#92400e',
+          background: isReady ? '#d1fae5' : '#fef3c7',
+        }}
+      >
+        {isReady ? 'Face centered' : 'Waiting for centered face'}
+      </div>
+      <button
+        type="button"
+        style={{
+          ...styles.fullscreenButton,
+          opacity: isReady ? 1 : 0.45,
+          cursor: isReady ? 'pointer' : 'not-allowed',
+        }}
+        onClick={onStart}
+        disabled={!isReady}
+      >
+        Start Gaze Calibration
       </button>
     </div>
   </div>
@@ -413,6 +529,28 @@ const styles = {
     color: '#ffffff',
     fontWeight: 800,
     cursor: 'pointer',
+  } as React.CSSProperties,
+
+  skipButton: {
+    marginTop: 10,
+    width: '100%',
+    border: '1px solid #cbd5e1',
+    borderRadius: 8,
+    padding: '12px 16px',
+    background: '#ffffff',
+    color: '#334155',
+    fontWeight: 800,
+    cursor: 'pointer',
+  } as React.CSSProperties,
+
+  centerStatus: {
+    marginTop: 16,
+    borderRadius: 8,
+    padding: '10px 12px',
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
   } as React.CSSProperties,
 
   nav: {

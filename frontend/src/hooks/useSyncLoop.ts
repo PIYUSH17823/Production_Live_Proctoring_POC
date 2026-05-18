@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FramePayload, SyncResponse } from '../types';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000';
 const SYNC_INTERVAL_MS = 1000;
 
 export const useSyncLoop = (

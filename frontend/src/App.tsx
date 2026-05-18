@@ -29,7 +29,10 @@ const ZONE_TEXT: Record<GazeZone, string> = {
   MISSING: '#991b1b',
 };
 
-const SESSION_ID = `session-${crypto.randomUUID()}`;
+// App.tsx — line 1
+const SESSION_ID = 
+  new URLSearchParams(window.location.search).get('session_id') 
+  ?? `session-${crypto.randomUUID()}`;
 
 function App() {
   const [isActive, setIsActive] = useState(false);

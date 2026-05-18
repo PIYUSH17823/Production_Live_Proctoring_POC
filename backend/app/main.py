@@ -17,6 +17,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "https://production-live-proctoring-poc.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -135,6 +136,15 @@ def sync(payload: SyncRequest) -> SyncResponse:
         echoed_frames=payload.frames,
     )
 
+
+@app.post("/api/session/start", response_model=SessionStartResponse)
+def session_start(body: SessionStartRequest) -> SessionStartResponse:
+    session_id = f"session-{uuid4()}"
+    get_or_create_session(session_id)
+    return SessionStartResponse(
+        session_id=session_id,
+        iframe_url=f"https://your-vercel-url.vercel.app?session_id={session_id}"
+    )
 
 @app.get("/api/admin/sessions", response_model=AdminSessionsResponse)
 def list_sessions() -> AdminSessionsResponse:

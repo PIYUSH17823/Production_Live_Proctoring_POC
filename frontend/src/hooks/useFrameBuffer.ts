@@ -9,6 +9,7 @@ interface FrameSource {
   gazeData: GazeData;
   fps: number;
   audioData: AudioData;
+  objects?: string[];
 }
 
 export const useFrameBuffer = (isActive: boolean, source: FrameSource) => {
@@ -34,7 +35,7 @@ export const useFrameBuffer = (isActive: boolean, source: FrameSource) => {
         fps: latest.fps,
         audio_level: latest.audioData.level,
         vad_speech: latest.audioData.isSpeaking,
-        objects: [],
+        objects: latest.objects || [],
       };
 
       frameBufferRef.current.push(frame);

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.services.confidence import calculate_confidence
+from app.services.events import detect_events
 
 app = FastAPI(title="PIE v2 Proctoring API")
 
@@ -73,12 +74,20 @@ class BaselineStats(BaseModel):
     audio_level: RollingMetricStats = Field(default_factory=RollingMetricStats)
 
 
+class Event(BaseModel):
+    type: str
+    severity: str
+    timestamp: str
+    details: str
+
+
 class SyncResponse(BaseModel):
     session_id: str
     received_count: int
     confidence: float
     echoed_frames: list[FramePayload]
     baseline: BaselineStats
+    events: list[Event]
 
 
 class SessionRecord(BaseModel):
@@ -94,6 +103,8 @@ class SessionRecord(BaseModel):
     baseline_windows: list[BaselineWindow] = Field(default_factory=list)
     baseline: BaselineStats = Field(default_factory=BaselineStats)
     recent_frames: list[FramePayload] = Field(default_factory=list)
+    events: list[Event] = Field(default_factory=list)
+    last_event_times: dict[str, float] = Field(default_factory=dict)
 
 
 class AdminSessionSummary(BaseModel):
@@ -242,12 +253,41 @@ def sync(payload: SyncRequest) -> SyncResponse:
     session.recent_frames.extend(payload.frames)
     session.recent_frames = session.recent_frames[-MAX_RECENT_FRAMES:]
 
+    new_events = []
+    if session.baseline.is_ready and payload.frames:
+        current_window = build_baseline_window(payload.frames)
+        
+        # Use LATEST frame's detected objects (most recent detection snapshot)
+        # Not all frames combined, which would multiply counts
+        all_objects = payload.frames[-1].objects if payload.frames else []
+        
+        print(f"[DEBUG] Latest frame objects: {all_objects}")
+        print(f"[DEBUG] Person count: {all_objects.count('person')}")
+        
+        # Get current timestamp
+        current_ts = datetime.now(timezone.utc).timestamp()
+        
+        detected_dicts = detect_events(
+            window_gaze=current_window.gaze_deviation,
+            window_audio=current_window.audio_level,
+            baseline_gaze_mean=session.baseline.gaze_deviation.mean,
+            baseline_gaze_std=session.baseline.gaze_deviation.std_dev,
+            baseline_audio_mean=session.baseline.audio_level.mean,
+            baseline_audio_std=session.baseline.audio_level.std_dev,
+            objects=all_objects,
+            last_event_times=session.last_event_times,
+            current_timestamp=current_ts,
+        )
+        new_events = [Event(**e) for e in detected_dicts]
+        session.events.extend(new_events)
+
     return SyncResponse(
         session_id=session.session_id,
         received_count=frame_count,
         confidence=confidence,
         echoed_frames=payload.frames,
         baseline=session.baseline,
+        events=new_events,
     )
 
 

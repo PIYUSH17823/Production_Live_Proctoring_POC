@@ -257,10 +257,12 @@ def sync(payload: SyncRequest) -> SyncResponse:
     if session.baseline.is_ready and payload.frames:
         current_window = build_baseline_window(payload.frames)
         
-        # Aggregate all detected objects from current window frames
-        all_objects = []
-        for frame in payload.frames:
-            all_objects.extend(frame.objects)
+        # Use LATEST frame's detected objects (most recent detection snapshot)
+        # Not all frames combined, which would multiply counts
+        all_objects = payload.frames[-1].objects if payload.frames else []
+        
+        print(f"[DEBUG] Latest frame objects: {all_objects}")
+        print(f"[DEBUG] Person count: {all_objects.count('person')}")
         
         # Get current timestamp
         current_ts = datetime.now(timezone.utc).timestamp()

@@ -6,6 +6,7 @@ DEDUP_WINDOWS = {
     "VOICE_DETECTED": 5,
     "SECOND_PERSON": 10,
     "PHONE_DETECTED": 0,  # log every detection
+    "TAB_SWITCH": 0,  # log every tab switch — needed for answer correlation (Sprint 7)
 }
 
 

@@ -114,27 +114,24 @@ export const useInference = (
       try {
         const predictions: any[] = await cocoSsdModelRef.current.detect(videoRef.current);
         
-        // Filter with different thresholds: phones lower (0.5) for better detection, others higher (0.65)
-        const detectedClasses = Array.from(
-          new Set(
-            predictions
-              .filter((p: any) => {
-                const lowerClass = String(p.class).toLowerCase();
-                // Lower threshold for phones to catch them at angles
-                if (lowerClass.includes('phone') || lowerClass.includes('cell')) {
-                  return p.score > 0.5;
-                }
-                // Standard threshold for other objects
-                return p.score > 0.65;
-              })
-              .map((p: any) => String(p.class).toLowerCase())
-          )
-        ) as string[];
+        // Filter with different thresholds: person lower (0.55) for better multi-person detection, others higher (0.65)
+        // IMPORTANT: Preserve duplicates in array so person_count works correctly on backend
+        const detectedClasses = predictions
+          .filter((p: any) => {
+            const lowerClass = String(p.class).toLowerCase();
+            // Lower threshold for person to catch second person at angles
+            if (lowerClass === 'person') {
+              return p.score > 0.55;
+            }
+            // Standard threshold for other objects (phone, laptop, etc)
+            return p.score > 0.65;
+          })
+          .map((p: any) => String(p.class).toLowerCase());
         
-        // Only update and log if detection results changed
+        // Only update and log if detection results changed (avoid spam)
         const classesChanged = previousObjectsRef.current.sort().join(',') !== detectedClasses.sort().join(',');
         if (classesChanged) {
-          console.log('[COCO-SSD] Objects detected:', detectedClasses);
+          console.log('[COCO-SSD] Objects detected:', detectedClasses, `(person count: ${detectedClasses.filter(c => c === 'person').length})`);
           previousObjectsRef.current = detectedClasses;
           setObjects(detectedClasses);
         }

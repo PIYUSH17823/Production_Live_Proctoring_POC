@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CalibrationMap, FaceLandmark, GazeData, GazeZone } from '../types';
 
+declare global {
+  interface Window {
+    FaceMesh?: any;
+    tf?: any;
+    cocoSsd?: any;
+  }
+}
+
 const DEFAULT_YAW_THRESHOLD = 35;
 const DEFAULT_PITCH_THRESHOLD = 20;
 const MIN_YAW_THRESHOLD = 12;
 const MIN_PITCH_THRESHOLD = 10;
 const RANGE_THRESHOLD_RATIO = 0.32;
+const OBJECT_DETECTION_INTERVAL_MS = 1000; // Run object detection every 1000ms
 
 interface FaceMeshResults {
   multiFaceLandmarks?: FaceLandmark[][];
@@ -23,10 +32,6 @@ interface FaceMeshInstance {
   close(): void;
 }
 
-interface FaceMeshConstructor {
-  new (config: { locateFile: (file: string) => string }): FaceMeshInstance;
-}
-
 export const useInference = (
   videoRef: React.RefObject<HTMLVideoElement | null>,
   isActive: boolean,
@@ -36,12 +41,17 @@ export const useInference = (
     zone: 'CENTER',
     pose: { yaw: 0, pitch: 0 },
   });
+  const [objects, setObjects] = useState<string[]>([]);
+  const previousObjectsRef = useRef<string[]>([]);
   const latestPoseRef = useRef({ yaw: 0, pitch: 0 });
   const [fps, setFps] = useState(0);
   const [landmarks, setLandmarks] = useState<FaceLandmark[]>([]);
   const faceMeshRef = useRef<FaceMeshInstance | null>(null);
+  const cocoSsdModelRef = useRef<any>(null);
   const frameCountRef = useRef(0);
   const lastFpsTime = useRef<number>(0);
+  const lastObjectDetectionTime = useRef<number>(0);
+  const isDetecting = useRef(false);
 
   const classifyZone = useCallback(
     (rawYaw: number, rawPitch: number): GazeZone => {
@@ -79,6 +89,61 @@ export const useInference = (
     let rafId = 0;
     let isRunning = true;
     let isProcessing = false;
+    let objectDetectionIntervalId = 0;
+
+    // Initialize COCO-SSD for object detection
+    const initCocoSsd = async () => {
+      try {
+        if (!window.cocoSsd) {
+          console.warn('[useInference] COCO-SSD not available, skipping object detection');
+          return;
+        }
+        const model = await window.cocoSsd.load();
+        cocoSsdModelRef.current = model;
+        console.log('[useInference] COCO-SSD model loaded');
+      } catch (err) {
+        console.error('[useInference] Failed to load COCO-SSD:', err);
+      }
+    };
+
+    // Run object detection periodically
+    const detectObjects = async () => {
+      if (!cocoSsdModelRef.current || !videoRef.current || isDetecting.current) return;
+
+      isDetecting.current = true;
+      try {
+        const predictions: any[] = await cocoSsdModelRef.current.detect(videoRef.current);
+        
+        // Filter with different thresholds: phones lower (0.5) for better detection, others higher (0.65)
+        const detectedClasses = Array.from(
+          new Set(
+            predictions
+              .filter((p: any) => {
+                const lowerClass = String(p.class).toLowerCase();
+                // Lower threshold for phones to catch them at angles
+                if (lowerClass.includes('phone') || lowerClass.includes('cell')) {
+                  return p.score > 0.5;
+                }
+                // Standard threshold for other objects
+                return p.score > 0.65;
+              })
+              .map((p: any) => String(p.class).toLowerCase())
+          )
+        ) as string[];
+        
+        // Only update and log if detection results changed
+        const classesChanged = previousObjectsRef.current.sort().join(',') !== detectedClasses.sort().join(',');
+        if (classesChanged) {
+          console.log('[COCO-SSD] Objects detected:', detectedClasses);
+          previousObjectsRef.current = detectedClasses;
+          setObjects(detectedClasses);
+        }
+      } catch (err) {
+        console.error('[useInference] Object detection error:', err);
+      } finally {
+        isDetecting.current = false;
+      }
+    };
 
     const fm = new window.FaceMesh({
       locateFile: (file: string) =>
@@ -145,6 +210,13 @@ export const useInference = (
 
     faceMeshRef.current = fm;
 
+    // Initialize COCO-SSD and start object detection
+    initCocoSsd().then(() => {
+      if (isRunning && cocoSsdModelRef.current) {
+        objectDetectionIntervalId = window.setInterval(detectObjects, OBJECT_DETECTION_INTERVAL_MS);
+      }
+    });
+
     const processFrame = async () => {
       const video = videoRef.current;
 
@@ -162,6 +234,7 @@ export const useInference = (
           isRunning = false;
           setFps(0);
           setLandmarks([]);
+          setObjects([]);
           setGazeData({ zone: 'MISSING', pose: { yaw: 0, pitch: 0 } });
           console.error('[useInference] FaceMesh frame error:', err);
         } finally {
@@ -179,20 +252,19 @@ export const useInference = (
     return () => {
       isRunning = false;
       cancelAnimationFrame(rafId);
+      if (objectDetectionIntervalId) clearInterval(objectDetectionIntervalId);
       setLandmarks([]);
+      setObjects([]);
       setFps(0);
       fm.close();
       faceMeshRef.current = null;
+      cocoSsdModelRef.current = null;
       lastFpsTime.current = 0;
       frameCountRef.current = 0;
+      lastObjectDetectionTime.current = 0;
+      previousObjectsRef.current = [];
     };
   }, [isActive, classifyZone, videoRef]);
 
-  return { gazeData, fps, landmarks, latestPoseRef };
+  return { gazeData, fps, landmarks, objects, latestPoseRef };
 };
-
-declare global {
-  interface Window {
-    FaceMesh?: FaceMeshConstructor;
-  }
-}

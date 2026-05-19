@@ -74,7 +74,7 @@ function App() {
 
   const { permission, micPermission, mediaStream, videoRef, requestAccess } =
     useCamera();
-  const { gazeData, fps, landmarks, latestPoseRef } = useInference(
+  const { gazeData, fps, landmarks, objects, latestPoseRef } = useInference(
     videoRef,
     isActive,
     calibrationMap,
@@ -89,6 +89,7 @@ function App() {
       gazeData,
       fps,
       audioData,
+      objects,
     });
   const {
     lastSyncCount,

@@ -1,4 +1,4 @@
-// Shared types used across hooks and components.
+// Shared types used across hooks and components
 
 export type PermissionState = 'idle' | 'requesting' | 'granted' | 'denied';
 
@@ -14,45 +14,9 @@ export interface GazeData {
   pose: HeadPose;
 }
 
-export type CalibrationPointId =
-  | 'top_left'
-  | 'top_right'
-  | 'bottom_right'
-  | 'bottom_left'
-  | 'center';
-
-export interface CalibrationPointSample {
-  point: CalibrationPointId;
-  yaw: number;
-  pitch: number;
-}
-
-export interface CalibrationTrackingSample {
-  timestamp: number;
-  targetX: number;
-  targetY: number;
-  yaw: number;
-  pitch: number;
-}
-
-export interface CalibrationMap {
-  centerYaw: number;
-  centerPitch: number;
-  yawRange: number;
-  pitchRange: number;
-  pointSamples: CalibrationPointSample[];
-  trackingSamples: CalibrationTrackingSample[];
-}
-
 export interface AudioData {
-  level: number;
+  level: number;      // 0.0 – 1.0 RMS
   isSpeaking: boolean;
-}
-
-export interface FaceLandmark {
-  x: number;
-  y: number;
-  z?: number;
 }
 
 export interface FramePayload {
@@ -60,20 +24,7 @@ export interface FramePayload {
   gaze_zone: GazeZone;
   head_pose: HeadPose;
   face_visible: boolean;
-  fps: number;
   audio_level: number;
   vad_speech: boolean;
   objects: string[];
-}
-
-export interface SyncRequest {
-  session_id: string;
-  frames: FramePayload[];
-}
-
-export interface SyncResponse {
-  session_id: string;
-  received_count: number;
-  confidence: number;
-  echoed_frames: FramePayload[];
 }

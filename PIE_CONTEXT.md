@@ -264,6 +264,12 @@ The system should:
 | Step-16| MODIFY | backend/app/main.py | L02,L04 | Integrated event factory and Event schema |
 | Step-17| CREATE | .vscode/settings.json | L00 | Configured VS Code to use backend venv python interpreter |
 | Step-18| MODIFY | .vscode/settings.json | L00 | Updated paths to absolute paths to support multi-workspace setups |
+| Step-19| MODIFY | PIE_CONTEXT.md | ALL | Started implementation of Essential Fixes and Sprint 5 completion |
+| Step-20| MODIFY | frontend/src/types.ts | L01 | Added sampleCount to CalibrationMap and PIEEvent |
+| Step-21| MODIFY | backend/app/main.py | L00 | Implemented /api/calibrate with validation & webhook support |
+| Step-22| MODIFY | frontend/src/hooks/useInference.ts | L01 | Gated object detection via enableObjectDetection |
+| Step-23| CREATE | frontend/src/components/LiveEventLog.tsx | L00 | Added frontend live event feed |
+| Step-24| MODIFY | frontend/src/App.tsx | L00 | Integrated Calibration validation & LiveEventLog |
 
 ---
 

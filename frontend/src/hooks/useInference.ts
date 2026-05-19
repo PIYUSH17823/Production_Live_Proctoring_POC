@@ -1,21 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CalibrationMap, FaceLandmark, GazeData, GazeZone } from '../types';
 
-declare global {
-  interface Window {
-    FaceMesh?: any;
-    tf?: any;
-    cocoSsd?: any;
-  }
-}
-
-const DEFAULT_YAW_THRESHOLD = 35;
-const DEFAULT_PITCH_THRESHOLD = 20;
-const MIN_YAW_THRESHOLD = 12;
-const MIN_PITCH_THRESHOLD = 10;
-const RANGE_THRESHOLD_RATIO = 0.32;
-const OBJECT_DETECTION_INTERVAL_MS = 1000; // Run object detection every 1000ms
-
 interface FaceMeshResults {
   multiFaceLandmarks?: FaceLandmark[][];
 }
@@ -32,11 +17,80 @@ interface FaceMeshInstance {
   close(): void;
 }
 
+interface FaceMeshConstructor {
+  new (config: { locateFile: (file: string) => string }): FaceMeshInstance;
+}
+
+interface CocoPrediction {
+  class: string;
+  score: number;
+}
+
+interface CocoSsdModel {
+  detect(video: HTMLVideoElement): Promise<CocoPrediction[]>;
+}
+
+interface CocoSsdGlobal {
+  load(): Promise<CocoSsdModel>;
+}
+
+declare global {
+  interface Window {
+    FaceMesh?: FaceMeshConstructor;
+    tf?: unknown;
+    cocoSsd?: CocoSsdGlobal;
+  }
+}
+
+const DEFAULT_YAW_THRESHOLD = 35;
+const DEFAULT_PITCH_THRESHOLD = 20;
+const MIN_YAW_THRESHOLD = 12;
+const MIN_PITCH_THRESHOLD = 10;
+const RANGE_THRESHOLD_RATIO = 0.32;
+const OBJECT_DETECTION_INTERVAL_MS = 1000;
+const PHONE_CLASS = 'cell phone';
+const PERSON_CLASS = 'person';
+const OTHER_OBJECT_CLASS = 'other_object';
+
+const normalizeDetectedClasses = (predictions: CocoPrediction[]): string[] => {
+  const personDetections = predictions.filter(
+    (prediction) =>
+      prediction.class.toLowerCase() === PERSON_CLASS && prediction.score > 0.55,
+  );
+  const phoneDetected = predictions.some(
+    (prediction) =>
+      prediction.class.toLowerCase() === PHONE_CLASS && prediction.score > 0.65,
+  );
+  const otherDetected = predictions.some((prediction) => {
+    const lowerClass = prediction.class.toLowerCase();
+    return (
+      lowerClass !== PERSON_CLASS &&
+      lowerClass !== PHONE_CLASS &&
+      prediction.score > 0.65
+    );
+  });
+
+  const normalized = [
+    ...personDetections.map(() => PERSON_CLASS),
+    ...(phoneDetected ? [PHONE_CLASS] : []),
+  ];
+
+  if (normalized.length === 0 && otherDetected) {
+    normalized.push(OTHER_OBJECT_CLASS);
+  }
+
+  return normalized;
+};
+
 export const useInference = (
   videoRef: React.RefObject<HTMLVideoElement | null>,
   isActive: boolean,
   calibrationMap: CalibrationMap | null = null,
+  enableObjectDetection: boolean = false,
 ) => {
+  const centerYaw = calibrationMap?.centerYaw ?? 0;
+  const centerPitch = calibrationMap?.centerPitch ?? 0;
+  const enableObjectDetectionRef = useRef(enableObjectDetection);
   const [gazeData, setGazeData] = useState<GazeData>({
     zone: 'CENTER',
     pose: { yaw: 0, pitch: 0 },
@@ -47,24 +101,24 @@ export const useInference = (
   const [fps, setFps] = useState(0);
   const [landmarks, setLandmarks] = useState<FaceLandmark[]>([]);
   const faceMeshRef = useRef<FaceMeshInstance | null>(null);
-  const cocoSsdModelRef = useRef<any>(null);
+  const cocoSsdModelRef = useRef<CocoSsdModel | null>(null);
   const frameCountRef = useRef(0);
   const lastFpsTime = useRef<number>(0);
-  const lastObjectDetectionTime = useRef<number>(0);
   const isDetecting = useRef(false);
+
+  useEffect(() => {
+    enableObjectDetectionRef.current = enableObjectDetection;
+  }, [enableObjectDetection]);
 
   const classifyZone = useCallback(
     (rawYaw: number, rawPitch: number): GazeZone => {
-      const yaw = rawYaw - (calibrationMap?.centerYaw ?? 0);
-      const pitch = rawPitch - (calibrationMap?.centerPitch ?? 0);
+      const yaw = rawYaw - centerYaw;
+      const pitch = rawPitch - centerPitch;
       const yawThreshold = calibrationMap
         ? Math.max(calibrationMap.yawRange * RANGE_THRESHOLD_RATIO, MIN_YAW_THRESHOLD)
         : DEFAULT_YAW_THRESHOLD;
       const pitchThreshold = calibrationMap
-        ? Math.max(
-            calibrationMap.pitchRange * RANGE_THRESHOLD_RATIO,
-            MIN_PITCH_THRESHOLD,
-          )
+        ? Math.max(calibrationMap.pitchRange * RANGE_THRESHOLD_RATIO, MIN_PITCH_THRESHOLD)
         : DEFAULT_PITCH_THRESHOLD;
 
       if (yaw > yawThreshold) return 'RIGHT';
@@ -73,12 +127,11 @@ export const useInference = (
       if (pitch < -pitchThreshold) return 'DOWN';
       return 'CENTER';
     },
-    [calibrationMap],
+    [calibrationMap, centerPitch, centerYaw],
   );
 
   useEffect(() => {
     if (!isActive) return;
-
     if (!window.FaceMesh) {
       console.error(
         '[useInference] FaceMesh global not found. Add the FaceMesh CDN script to index.html',
@@ -91,7 +144,6 @@ export const useInference = (
     let isProcessing = false;
     let objectDetectionIntervalId = 0;
 
-    // Initialize COCO-SSD for object detection
     const initCocoSsd = async () => {
       try {
         if (!window.cocoSsd) {
@@ -106,32 +158,31 @@ export const useInference = (
       }
     };
 
-    // Run object detection periodically
     const detectObjects = async () => {
-      if (!cocoSsdModelRef.current || !videoRef.current || isDetecting.current) return;
+      if (
+        !cocoSsdModelRef.current ||
+        !videoRef.current ||
+        isDetecting.current ||
+        !enableObjectDetectionRef.current
+      ) {
+        return;
+      }
 
       isDetecting.current = true;
       try {
-        const predictions: any[] = await cocoSsdModelRef.current.detect(videoRef.current);
-        
-        // Filter with different thresholds: person lower (0.55) for better multi-person detection, others higher (0.65)
-        // IMPORTANT: Preserve duplicates in array so person_count works correctly on backend
-        const detectedClasses = predictions
-          .filter((p: any) => {
-            const lowerClass = String(p.class).toLowerCase();
-            // Lower threshold for person to catch second person at angles
-            if (lowerClass === 'person') {
-              return p.score > 0.55;
-            }
-            // Standard threshold for other objects (phone, laptop, etc)
-            return p.score > 0.65;
-          })
-          .map((p: any) => String(p.class).toLowerCase());
-        
-        // Only update and log if detection results changed (avoid spam)
-        const classesChanged = previousObjectsRef.current.sort().join(',') !== detectedClasses.sort().join(',');
+        const predictions = await cocoSsdModelRef.current.detect(videoRef.current);
+        const detectedClasses = normalizeDetectedClasses(predictions);
+
+        const previousClasses = [...previousObjectsRef.current].sort().join(',');
+        const nextClasses = [...detectedClasses].sort().join(',');
+        const classesChanged = previousClasses !== nextClasses;
+
         if (classesChanged) {
-          console.log('[COCO-SSD] Objects detected:', detectedClasses, `(person count: ${detectedClasses.filter(c => c === 'person').length})`);
+          console.log(
+            '[COCO-SSD] Objects detected:',
+            detectedClasses,
+            `(person count: ${detectedClasses.filter((value) => value === 'person').length})`,
+          );
           previousObjectsRef.current = detectedClasses;
           setObjects(detectedClasses);
         }
@@ -159,7 +210,6 @@ export const useInference = (
       const now = Date.now();
 
       if (lastFpsTime.current === 0) lastFpsTime.current = now;
-
       if (now - lastFpsTime.current >= 1000) {
         setFps(frameCountRef.current);
         frameCountRef.current = 0;
@@ -185,10 +235,8 @@ export const useInference = (
 
       const midEarX = (leftEar.x + rightEar.x) / 2;
       const rawYaw = (nose.x - midEarX) * 500;
-
       const midVertY = (forehead.y + chin.y) / 2;
       const rawPitch = (nose.y - midVertY) * 500;
-
       const zone = classifyZone(rawYaw, rawPitch);
 
       console.log(
@@ -199,18 +247,20 @@ export const useInference = (
       setGazeData({
         zone,
         pose: {
-          yaw: rawYaw - (calibrationMap?.centerYaw ?? 0),
-          pitch: rawPitch - (calibrationMap?.centerPitch ?? 0),
+          yaw: rawYaw - centerYaw,
+          pitch: rawPitch - centerPitch,
         },
       });
     });
 
     faceMeshRef.current = fm;
 
-    // Initialize COCO-SSD and start object detection
-    initCocoSsd().then(() => {
+    void initCocoSsd().then(() => {
       if (isRunning && cocoSsdModelRef.current) {
-        objectDetectionIntervalId = window.setInterval(detectObjects, OBJECT_DETECTION_INTERVAL_MS);
+        objectDetectionIntervalId = window.setInterval(
+          detectObjects,
+          OBJECT_DETECTION_INTERVAL_MS,
+        );
       }
     });
 
@@ -249,7 +299,9 @@ export const useInference = (
     return () => {
       isRunning = false;
       cancelAnimationFrame(rafId);
-      if (objectDetectionIntervalId) clearInterval(objectDetectionIntervalId);
+      if (objectDetectionIntervalId) {
+        window.clearInterval(objectDetectionIntervalId);
+      }
       setLandmarks([]);
       setObjects([]);
       setFps(0);
@@ -258,10 +310,9 @@ export const useInference = (
       cocoSsdModelRef.current = null;
       lastFpsTime.current = 0;
       frameCountRef.current = 0;
-      lastObjectDetectionTime.current = 0;
       previousObjectsRef.current = [];
     };
-  }, [isActive, classifyZone, videoRef]);
+  }, [centerPitch, centerYaw, classifyZone, isActive, videoRef]);
 
   return { gazeData, fps, landmarks, objects, latestPoseRef };
 };

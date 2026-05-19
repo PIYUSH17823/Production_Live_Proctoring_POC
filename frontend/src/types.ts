@@ -40,6 +40,7 @@ export interface CalibrationMap {
   centerPitch: number;
   yawRange: number;
   pitchRange: number;
+  sampleCount: number;
   pointSamples: CalibrationPointSample[];
   trackingSamples: CalibrationTrackingSample[];
 }
@@ -71,9 +72,17 @@ export interface SyncRequest {
   frames: FramePayload[];
 }
 
+export interface PIEEvent {
+  type: string;
+  severity: string;
+  timestamp: string;
+  details: string;
+}
+
 export interface SyncResponse {
   session_id: string;
   received_count: number;
   confidence: number;
   echoed_frames: FramePayload[];
+  events?: PIEEvent[];
 }

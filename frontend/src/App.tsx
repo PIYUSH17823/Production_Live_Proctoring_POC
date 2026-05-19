@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { isBrowserSupported, useCamera } from './hooks/useCamera';
 import { useAudio } from './hooks/useAudio';
@@ -10,7 +10,11 @@ import AudioBar from './components/AudioBar';
 import CalibrationOverlay from './components/CalibrationOverlay';
 import CameraPermission from './components/CameraPermission';
 import SignalQualityBadge from './components/SignalQualityBadge';
+import LiveEventLog from './components/LiveEventLog';
 import type { CalibrationMap, FaceLandmark, GazeZone } from './types';
+
+const SESSION_ID_STORAGE_KEY = 'pie_session_id';
+const PROCTORING_TOKEN_STORAGE_KEY = 'pie_proctoring_token';
 
 const ZONE_COLORS: Record<GazeZone, string> = {
   CENTER: '#d1fae5',
@@ -31,16 +35,29 @@ const ZONE_TEXT: Record<GazeZone, string> = {
 };
 
 const searchParams = new URLSearchParams(window.location.search);
+const storedSessionId = window.localStorage.getItem(SESSION_ID_STORAGE_KEY);
+const storedToken = window.localStorage.getItem(PROCTORING_TOKEN_STORAGE_KEY);
 const SESSION_ID =
-  searchParams.get('session_id') ?? `session-${crypto.randomUUID()}`;
-const PROCTORING_TOKEN = searchParams.get('token');
+  searchParams.get('session_id') ??
+  storedSessionId ??
+  `session-${crypto.randomUUID()}`;
+const PROCTORING_TOKEN = searchParams.get('token') ?? storedToken;
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000';
 const IS_DEV_MODE = searchParams.get('dev') === '1';
+
+window.localStorage.setItem(SESSION_ID_STORAGE_KEY, SESSION_ID);
+if (PROCTORING_TOKEN) {
+  window.localStorage.setItem(PROCTORING_TOKEN_STORAGE_KEY, PROCTORING_TOKEN);
+} else {
+  window.localStorage.removeItem(PROCTORING_TOKEN_STORAGE_KEY);
+}
 
 const DEV_CALIBRATION_MAP: CalibrationMap = {
   centerYaw: 0,
   centerPitch: 0,
   yawRange: 100,
   pitchRange: 80,
+  sampleCount: 20,
   pointSamples: [],
   trackingSamples: [],
 };
@@ -52,6 +69,7 @@ function App() {
   const [isInstructionAccepted, setIsInstructionAccepted] = useState(false);
   const [isFullscreenReady, setIsFullscreenReady] = useState(false);
   const [isFaceCentered, setIsFaceCentered] = useState(false);
+  const [calibrationAttempt, setCalibrationAttempt] = useState(0);
   const [calibrationMap, setCalibrationMap] = useState<CalibrationMap | null>(
     null,
   );
@@ -78,11 +96,12 @@ function App() {
     videoRef,
     isActive,
     calibrationMap,
+    isProctoringActive,
   );
   const isFaceReady =
     landmarks.length >= 468 &&
-    Math.abs(latestPoseRef.current.yaw) <= CENTERING_YAW_LIMIT &&
-    Math.abs(latestPoseRef.current.pitch) <= CENTERING_PITCH_LIMIT;
+    Math.abs(gazeData.pose.yaw) <= CENTERING_YAW_LIMIT &&
+    Math.abs(gazeData.pose.pitch) <= CENTERING_PITCH_LIMIT;
   const { audioData } = useAudio(isProctoringActive, mediaStream);
   const { frameBufferRef, bufferSize, collectedCount, maxBufferSize } =
     useFrameBuffer(isProctoringActive, {
@@ -98,6 +117,7 @@ function App() {
     lastError,
     confidence,
     retryCount,
+    events,
   } =
     useSyncLoop(isProctoringActive, SESSION_ID, frameBufferRef);
 
@@ -116,6 +136,33 @@ function App() {
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
+  }, []);
+
+  const handleCalibrationComplete = useCallback(async (map: CalibrationMap) => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/calibrate?session_id=${SESSION_ID}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(map),
+        }
+      ).then((r) => r.json());
+
+      if (res.valid) {
+        setCalibrationMap(map); // use for gaze offset
+      } else {
+        // Reset and force retry
+        setIsFaceCentered(false);
+        setCalibrationAttempt((a) => a + 1);
+        alert(`Calibration failed: ${res.reason}\n\nPlease try again.`);
+      }
+    } catch (err) {
+      console.error('[Calibration] request failed:', err);
+      setIsFaceCentered(false);
+      setCalibrationAttempt((a) => a + 1);
+      alert('Network error during calibration. Please try again.');
+    }
   }, []);
 
   const handleEnterFullscreen = async () => {
@@ -160,9 +207,10 @@ function App() {
         <FaceCenteringGate isReady={isFaceReady} onStart={() => setIsFaceCentered(true)} />
       )}
       <CalibrationOverlay
+        key={calibrationAttempt}
         isActive={isCalibrating}
         latestPoseRef={latestPoseRef}
-        onComplete={setCalibrationMap}
+        onComplete={handleCalibrationComplete}
       />
       <nav style={styles.nav}>
         <div style={styles.navBrand}>
@@ -340,6 +388,8 @@ function App() {
               {PROCTORING_TOKEN ? 'present' : 'dev generated'}
             </span>
           </div>
+
+          <LiveEventLog events={events} />
         </div>
       </main>
     </div>

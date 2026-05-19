@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FramePayload, SyncResponse } from '../types';
+import type { FramePayload, PIEEvent, SyncResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000';
-const SYNC_INTERVAL_MS = 1000;
+const SYNC_INTERVAL_MS = 5000;
 
 export const useSyncLoop = (
   isActive: boolean,
@@ -15,6 +15,7 @@ export const useSyncLoop = (
   const [lastError, setLastError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [events, setEvents] = useState<PIEEvent[]>([]);
   const isSyncingRef = useRef(false);
 
   useEffect(() => {
@@ -45,6 +46,10 @@ export const useSyncLoop = (
         setLastSyncCount(data.received_count);
         setTotalSynced((count) => count + data.received_count);
         setConfidence(data.confidence);
+        const newEvents = data.events || [];
+        if (newEvents.length > 0) {
+          setEvents((prev) => [...prev, ...newEvents].slice(-10)); // Keep last 10
+        }
         setSyncStatus('ok');
         setLastError(null);
         setRetryCount(0);
@@ -73,5 +78,6 @@ export const useSyncLoop = (
     lastError,
     confidence,
     retryCount,
+    events,
   };
 };

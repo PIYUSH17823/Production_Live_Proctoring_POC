@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.confidence import calculate_confidence
 
@@ -27,6 +27,7 @@ app.add_middleware(
 
 GazeZone = Literal["CENTER", "LEFT", "RIGHT", "UP", "DOWN", "MISSING"]
 MAX_RECENT_FRAMES = 200
+BASELINE_WINDOW_LIMIT = 12
 SESSION_TOKEN_TTL_MINUTES = 120
 FRONTEND_IFRAME_BASE_URL = (
     "https://production-live-proct-git-b68f3b-piyush9-skilljourneys-projects.vercel.app"
@@ -55,11 +56,29 @@ class SyncRequest(BaseModel):
     frames: list[FramePayload]
 
 
+class BaselineWindow(BaseModel):
+    gaze_deviation: float
+    audio_level: float
+
+
+class RollingMetricStats(BaseModel):
+    mean: float = 0.0
+    std_dev: float = 0.0
+
+
+class BaselineStats(BaseModel):
+    windows_collected: int = 0
+    is_ready: bool = False
+    gaze_deviation: RollingMetricStats = Field(default_factory=RollingMetricStats)
+    audio_level: RollingMetricStats = Field(default_factory=RollingMetricStats)
+
+
 class SyncResponse(BaseModel):
     session_id: str
     received_count: int
     confidence: float
     echoed_frames: list[FramePayload]
+    baseline: BaselineStats
 
 
 class SessionRecord(BaseModel):
@@ -72,7 +91,9 @@ class SessionRecord(BaseModel):
     expires_at: str | None = None
     total_frames: int = 0
     last_confidence: float = 0.0
-    recent_frames: list[FramePayload] = []
+    baseline_windows: list[BaselineWindow] = Field(default_factory=list)
+    baseline: BaselineStats = Field(default_factory=BaselineStats)
+    recent_frames: list[FramePayload] = Field(default_factory=list)
 
 
 class AdminSessionSummary(BaseModel):
@@ -84,6 +105,8 @@ class AdminSessionSummary(BaseModel):
     expires_at: str | None = None
     total_frames: int
     last_confidence: float
+    baseline_ready: bool
+    baseline_windows: int
     recent_frame_count: int
 
 
@@ -112,6 +135,64 @@ def build_iframe_url(session_id: str, proctoring_token: str) -> str:
         f"{FRONTEND_IFRAME_BASE_URL}/"
         f"?session_id={session_id}&token={proctoring_token}"
     )
+
+
+def calculate_mean(values: list[float]) -> float:
+    if not values:
+        return 0.0
+
+    return sum(values) / len(values)
+
+
+def calculate_std_dev(values: list[float], mean: float) -> float:
+    if len(values) < 2:
+        return 0.0
+
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def calculate_gaze_deviation(frame: FramePayload) -> float:
+    return (frame.head_pose.yaw**2 + frame.head_pose.pitch**2) ** 0.5
+
+
+def build_baseline_window(frames: list[FramePayload]) -> BaselineWindow:
+    if not frames:
+        return BaselineWindow(gaze_deviation=0.0, audio_level=0.0)
+
+    return BaselineWindow(
+        gaze_deviation=calculate_mean(
+            [calculate_gaze_deviation(frame) for frame in frames]
+        ),
+        audio_level=calculate_mean([frame.audio_level for frame in frames]),
+    )
+
+
+def build_baseline_stats(windows: list[BaselineWindow]) -> BaselineStats:
+    gaze_values = [window.gaze_deviation for window in windows]
+    audio_values = [window.audio_level for window in windows]
+    gaze_mean = calculate_mean(gaze_values)
+    audio_mean = calculate_mean(audio_values)
+
+    return BaselineStats(
+        windows_collected=len(windows),
+        is_ready=len(windows) >= BASELINE_WINDOW_LIMIT,
+        gaze_deviation=RollingMetricStats(
+            mean=round(gaze_mean, 4),
+            std_dev=round(calculate_std_dev(gaze_values, gaze_mean), 4),
+        ),
+        audio_level=RollingMetricStats(
+            mean=round(audio_mean, 4),
+            std_dev=round(calculate_std_dev(audio_values, audio_mean), 4),
+        ),
+    )
+
+
+def update_baseline(session: SessionRecord, frames: list[FramePayload]) -> None:
+    if len(session.baseline_windows) < BASELINE_WINDOW_LIMIT:
+        session.baseline_windows.append(build_baseline_window(frames))
+
+    session.baseline = build_baseline_stats(session.baseline_windows)
 
 
 def get_or_create_session(session_id: str | None) -> SessionRecord:
@@ -157,6 +238,7 @@ def sync(payload: SyncRequest) -> SyncResponse:
     session.last_seen_at = utc_now()
     session.total_frames += frame_count
     session.last_confidence = confidence
+    update_baseline(session, payload.frames)
     session.recent_frames.extend(payload.frames)
     session.recent_frames = session.recent_frames[-MAX_RECENT_FRAMES:]
 
@@ -165,6 +247,7 @@ def sync(payload: SyncRequest) -> SyncResponse:
         received_count=frame_count,
         confidence=confidence,
         echoed_frames=payload.frames,
+        baseline=session.baseline,
     )
 
 
@@ -205,6 +288,8 @@ def list_sessions() -> AdminSessionsResponse:
                 expires_at=session.expires_at,
                 total_frames=session.total_frames,
                 last_confidence=session.last_confidence,
+                baseline_ready=session.baseline.is_ready,
+                baseline_windows=session.baseline.windows_collected,
                 recent_frame_count=len(session.recent_frames),
             )
             for session in SESSION_STORE.values()

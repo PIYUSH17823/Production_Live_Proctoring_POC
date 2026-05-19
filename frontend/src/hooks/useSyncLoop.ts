@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FramePayload, PIEEvent, SyncResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000';
-const SYNC_INTERVAL_MS = 5000;
+const SYNC_INTERVAL_MS = 1000;
 
 export const useSyncLoop = (
   isActive: boolean,
@@ -17,6 +17,31 @@ export const useSyncLoop = (
   const [retryCount, setRetryCount] = useState(0);
   const [events, setEvents] = useState<PIEEvent[]>([]);
   const isSyncingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const timestamp = Date.now() / 1000;
+        fetch(`${API_BASE_URL}/api/event/tab-switch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            timestamp,
+          }),
+        }).catch((err) => {
+          console.error('[TabSwitch] failed to report:', err);
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isActive, sessionId]);
 
   useEffect(() => {
     if (!isActive) return;

@@ -83,6 +83,5 @@ export interface SyncResponse {
   session_id: string;
   received_count: number;
   confidence: number;
-  echoed_frames: FramePayload[];
   events?: PIEEvent[];
 }

@@ -148,6 +148,7 @@ The system should:
 | SECOND_PERSON | Additional face detected | Critical | L04 | Active |
 | VOICE_DETECTED | VAD speech spike | Moderate | L04 | Active |
 | FACE_ABSENT | Face invisible | Moderate | L04 | Active |
+| TAB_SWITCH | Candidate navigated away | Moderate | L04 | Active |
 | IDENTITY_DRIFT | Embedding mismatch | Critical | L09 | Planned |
 
 ---
@@ -170,7 +171,8 @@ The system should:
 | Method | Endpoint | Purpose | Layer | Status |
 |--------|----------|---------|--------|--------|
 | POST | /api/sync | Telemetry sync | L02 | Active |
-| POST | /api/calibrate | Save calibration map | L00 | Planned |
+| POST | /api/calibrate | Save calibration map | L00 | Active |
+| POST | /api/event/tab-switch | Record tab switch event | L04 | Active |
 | POST | /api/verify-id | Identity verification | L09 | Planned |
 | POST | /api/correlate-answer | Behavior-answer correlation | L10 | Planned |
 | GET | /api/session/{id} | Session details | Dashboard | Planned |
@@ -270,6 +272,9 @@ The system should:
 | Step-22| MODIFY | frontend/src/hooks/useInference.ts | L01 | Gated object detection via enableObjectDetection |
 | Step-23| CREATE | frontend/src/components/LiveEventLog.tsx | L00 | Added frontend live event feed |
 | Step-24| MODIFY | frontend/src/App.tsx | L00 | Integrated Calibration validation & LiveEventLog |
+| Step-25| MODIFY | frontend/src/hooks/useSyncLoop.ts | L02 | Reduced sync interval to 1s and added tab visibility change listener |
+| Step-26| MODIFY | frontend/src/types.ts | L01 | Removed echoed_frames from SyncResponse |
+| Step-27| MODIFY | backend/app/main.py | L02, L00 | Removed echoed_frames, added partial calibration validation, and added /api/event/tab-switch |
 
 ---
 

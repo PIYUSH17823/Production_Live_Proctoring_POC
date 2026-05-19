@@ -90,7 +90,6 @@ class SyncResponse(BaseModel):
     session_id: str
     received_count: int
     confidence: float
-    echoed_frames: list[FramePayload]
     baseline: BaselineStats
     events: list[Event]
 
@@ -159,6 +158,11 @@ class CalibrationMap(BaseModel):
 class CalibrationResponse(BaseModel):
     valid: bool
     reason: str
+
+
+class TabSwitchRequest(BaseModel):
+    session_id: str
+    timestamp: float
 
 def post_webhook(url: str, payload: dict):
     try:
@@ -359,7 +363,6 @@ def sync(payload: SyncRequest, background_tasks: BackgroundTasks) -> SyncRespons
         session_id=session.session_id,
         received_count=frame_count,
         confidence=confidence,
-        echoed_frames=payload.frames,
         baseline=session.baseline,
         events=new_events,
     )
@@ -416,6 +419,23 @@ def list_sessions() -> AdminSessionsResponse:
 def get_session(session_id: str) -> SessionRecord:
     return get_existing_session_or_404(session_id)
 
+@app.post("/api/event/tab-switch")
+def record_tab_switch(body: TabSwitchRequest):
+    session = get_or_create_session(body.session_id)
+    current_ts = body.timestamp or datetime.now(timezone.utc).timestamp()
+    now_iso = datetime.fromtimestamp(current_ts, timezone.utc).isoformat()
+    
+    event = Event(
+        type="TAB_SWITCH",
+        severity="Moderate",
+        timestamp=now_iso,
+        details="Candidate navigated away from assessment tab"
+    )
+    session.events.append(event)
+    session.last_event_times["TAB_SWITCH"] = current_ts
+    return {"status": "recorded"}
+
+
 @app.post("/api/calibrate", response_model=CalibrationResponse)
 def calibrate(session_id: str, body: CalibrationMap) -> CalibrationResponse:
     session = get_or_create_session(session_id)
@@ -428,10 +448,12 @@ def calibrate(session_id: str, body: CalibrationMap) -> CalibrationResponse:
         )
     session.calibration_attempts += 1
 
-    # Removed strict range validation:
-    # If the candidate only moves their eyes and not their head, their raw head-pose range
-    # will be very small (e.g. < 5.0). By capturing this small range, the frontend
-    # correctly sets a tight threshold for their specific behavior.
+    # Validate yaw/pitch range for minimum eye movement sanity check
+    if body.yawRange < 2.0 and body.pitchRange < 2.0:
+        return CalibrationResponse(
+            valid=False,
+            reason="No eye movement detected. Please follow the dot with your eyes."
+        )
 
     # Validate sample count
     if body.sampleCount < 15:

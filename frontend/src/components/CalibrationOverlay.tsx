@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type {
   CalibrationMap,
   CalibrationPointId,
@@ -65,6 +65,7 @@ const buildCalibrationMap = (
     centerPitch: round(centerSample?.pitch ?? 0),
     yawRange: round(yawRange || 1),
     pitchRange: round(pitchRange || 1),
+    sampleCount: trackingSamples.length,
     pointSamples,
     trackingSamples,
   };
@@ -90,30 +91,18 @@ const CalibrationOverlay: React.FC<Props> = ({
   const completedSamples = pointIndex * SAMPLES_PER_POINT + sampleCount;
   const pointProgress = Math.min((completedSamples / totalSamples) * 100, 100);
   const trackingProgress = Math.min((trackingElapsedMs / TRACKING_MS) * 100, 100);
-  const progress =
-    phase === 'tracking'
-      ? 50 + trackingProgress / 2
-      : pointProgress / 2;
+  const progress = phase === 'tracking' ? 50 + trackingProgress / 2 : pointProgress / 2;
   const trackingPosition = getFigureEightPosition(trackingElapsedMs);
-
-  const pointSamples = useMemo(
-    () =>
-      collectedRef.current.filter(
-        (sample) => sample.point === currentPoint?.id,
-      ),
-    [currentPoint?.id, sampleCount],
-  );
 
   useEffect(() => {
     if (!isActive || isDone || !currentPoint) return;
 
-    setSampleCount(0);
-    setPhase('moving');
     let pauseId = 0;
+    let intervalId = 0;
     const travelId = window.setTimeout(() => {
       setPhase('sampling');
       pauseId = window.setTimeout(() => {
-        const intervalId = window.setInterval(() => {
+        intervalId = window.setInterval(() => {
           const pose = latestPoseRef.current;
           collectedRef.current.push({
             point: currentPoint.id,
@@ -134,6 +123,8 @@ const CalibrationOverlay: React.FC<Props> = ({
                   return index;
                 }
 
+                setSampleCount(0);
+                setPhase('moving');
                 return nextIndex;
               });
             }
@@ -147,8 +138,9 @@ const CalibrationOverlay: React.FC<Props> = ({
     return () => {
       window.clearTimeout(travelId);
       window.clearTimeout(pauseId);
+      window.clearInterval(intervalId);
     };
-  }, [currentPoint, isActive, isDone, latestPoseRef, onComplete]);
+  }, [currentPoint, isActive, isDone, latestPoseRef]);
 
   useEffect(() => {
     if (!isActive || isDone || phase !== 'tracking') return;
@@ -212,8 +204,8 @@ const CalibrationOverlay: React.FC<Props> = ({
           {phase === 'tracking'
             ? 'Follow the figure-8 path smoothly'
             : phase === 'moving'
-            ? `Follow the dot to ${currentPoint.label}`
-            : `Hold your gaze on ${currentPoint.label}`}
+              ? `Follow the dot to ${currentPoint.label}`
+              : `Hold your gaze on ${currentPoint.label}`}
         </div>
         <div style={styles.progressTrack}>
           <div style={{ ...styles.progressFill, width: `${progress}%` }} />
@@ -221,7 +213,7 @@ const CalibrationOverlay: React.FC<Props> = ({
         <div style={styles.meta}>
           {phase === 'tracking'
             ? `Tracking ${(TRACKING_MS - trackingElapsedMs) / 1000}s`
-            : `Point ${pointIndex + 1}/${POINTS.length} · ${phase} · Samples ${pointSamples.length}/${SAMPLES_PER_POINT}`}
+            : `Point ${pointIndex + 1}/${POINTS.length} · ${phase} · Samples ${sampleCount}/${SAMPLES_PER_POINT}`}
         </div>
       </div>
     </div>

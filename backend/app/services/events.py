@@ -38,9 +38,10 @@ def detect_events(
     baseline_gaze_std: float,
     baseline_audio_mean: float,
     baseline_audio_std: float,
+    speech_detected: bool = False,
     objects: list[str] | None = None,
     last_event_times: dict[str, float] | None = None,
-    current_timestamp: str | None = None,
+    current_timestamp: float | None = None,
 ) -> list[dict]:
     """
     Detect events based on gaze, audio, and object detection with deduplication.
@@ -80,15 +81,15 @@ def detect_events(
             })
             last_event_times["GAZE_AWAY"] = current_timestamp
     
-    # 2. Check VOICE_DETECTED via Z-score
+    # 2. Check VOICE_DETECTED via positive audio spike plus speech activity
     audio_z = calculate_z_score(window_audio, baseline_audio_mean, baseline_audio_std)
-    if abs(audio_z) > 2.5:
+    if speech_detected and audio_z > 2.5:
         if should_emit_event("VOICE_DETECTED", last_event_times, current_timestamp):
             events.append({
                 "type": "VOICE_DETECTED",
                 "severity": "Moderate",
                 "timestamp": now_iso,
-                "details": f"Audio level z-score {audio_z:.2f} exceeds threshold of 2.5",
+                "details": f"Audio level z-score {audio_z:.2f} exceeds threshold of 2.5 while speech is active",
             })
             last_event_times["VOICE_DETECTED"] = current_timestamp
     

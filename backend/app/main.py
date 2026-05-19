@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+import json
+import os
+import urllib.request
 from secrets import token_urlsafe
-from typing import Literal
+from typing import Literal, Any
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -30,8 +33,10 @@ GazeZone = Literal["CENTER", "LEFT", "RIGHT", "UP", "DOWN", "MISSING"]
 MAX_RECENT_FRAMES = 200
 BASELINE_WINDOW_LIMIT = 12
 SESSION_TOKEN_TTL_MINUTES = 120
-FRONTEND_IFRAME_BASE_URL = (
-    "https://production-live-proct-git-b68f3b-piyush9-skilljourneys-projects.vercel.app"
+WEBHOOK_INTERVAL_SECONDS = 5
+FRONTEND_IFRAME_BASE_URL = os.getenv(
+    "FRONTEND_IFRAME_BASE_URL",
+    "http://127.0.0.1:5173/",
 )
 SESSION_STORE: dict[str, "SessionRecord"] = {}
 
@@ -98,6 +103,10 @@ class SessionRecord(BaseModel):
     assessment_id: str | None = None
     proctoring_token: str | None = None
     expires_at: str | None = None
+    webhook_url: str | None = None
+    calibration_attempts: int = 0
+    calibration_map: dict[str, Any] | None = None
+    calibration_complete: bool = False
     total_frames: int = 0
     last_confidence: float = 0.0
     baseline_windows: list[BaselineWindow] = Field(default_factory=list)
@@ -105,6 +114,7 @@ class SessionRecord(BaseModel):
     recent_frames: list[FramePayload] = Field(default_factory=list)
     events: list[Event] = Field(default_factory=list)
     last_event_times: dict[str, float] = Field(default_factory=dict)
+    last_webhook_sent_at: float = 0.0
 
 
 class AdminSessionSummary(BaseModel):
@@ -128,6 +138,7 @@ class AdminSessionsResponse(BaseModel):
 class SessionStartRequest(BaseModel):
     candidate_id: str
     assessment_id: str
+    webhook_url: str | None = None
 
 
 class SessionStartResponse(BaseModel):
@@ -135,6 +146,32 @@ class SessionStartResponse(BaseModel):
     proctoring_token: str
     expires_at: str
     iframe_url: str
+
+class CalibrationMap(BaseModel):
+    centerYaw: float
+    centerPitch: float
+    yawRange: float      # max - min yaw across all points
+    pitchRange: float    # max - min pitch across all points
+    sampleCount: int     # how many frames were captured
+    pointSamples: list[dict[str, Any]]
+    trackingSamples: list[dict[str, Any]]
+
+class CalibrationResponse(BaseModel):
+    valid: bool
+    reason: str
+
+def post_webhook(url: str, payload: dict):
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            pass
+    except Exception as e:
+        print(f"[Webhook] Failed to send update to {url}: {e}")
 
 
 def utc_now() -> str:
@@ -199,6 +236,23 @@ def build_baseline_stats(windows: list[BaselineWindow]) -> BaselineStats:
     )
 
 
+def summarize_objects_for_batch(frames: list[FramePayload]) -> list[str]:
+    if not frames:
+        return []
+
+    phone_detected = any("cell phone" in frame.objects for frame in frames)
+    max_person_count = max((frame.objects.count("person") for frame in frames), default=0)
+    other_object_detected = any("other_object" in frame.objects for frame in frames)
+
+    summarized_objects = ["person"] * max_person_count
+    if phone_detected:
+        summarized_objects.append("cell phone")
+    elif max_person_count == 0 and other_object_detected:
+        summarized_objects.append("other_object")
+
+    return summarized_objects
+
+
 def update_baseline(session: SessionRecord, frames: list[FramePayload]) -> None:
     if len(session.baseline_windows) < BASELINE_WINDOW_LIMIT:
         session.baseline_windows.append(build_baseline_window(frames))
@@ -222,14 +276,22 @@ def get_or_create_session(session_id: str | None) -> SessionRecord:
     return record
 
 
+def get_existing_session_or_404(session_id: str) -> SessionRecord:
+    record = SESSION_STORE.get(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return record
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/api/sync", response_model=SyncResponse)
-def sync(payload: SyncRequest) -> SyncResponse:
+def sync(payload: SyncRequest, background_tasks: BackgroundTasks) -> SyncResponse:
     frame_count = len(payload.frames)
+    current_ts = datetime.now(timezone.utc).timestamp()
     avg_fps = (
         sum(frame.fps for frame in payload.frames) / frame_count
         if frame_count
@@ -256,16 +318,12 @@ def sync(payload: SyncRequest) -> SyncResponse:
     new_events = []
     if session.baseline.is_ready and payload.frames:
         current_window = build_baseline_window(payload.frames)
-        
-        # Use LATEST frame's detected objects (most recent detection snapshot)
-        # Not all frames combined, which would multiply counts
-        all_objects = payload.frames[-1].objects if payload.frames else []
-        
+        speech_detected = any(frame.vad_speech for frame in payload.frames)
+
+        all_objects = summarize_objects_for_batch(payload.frames)
+
         print(f"[DEBUG] Latest frame objects: {all_objects}")
         print(f"[DEBUG] Person count: {all_objects.count('person')}")
-        
-        # Get current timestamp
-        current_ts = datetime.now(timezone.utc).timestamp()
         
         detected_dicts = detect_events(
             window_gaze=current_window.gaze_deviation,
@@ -274,12 +332,28 @@ def sync(payload: SyncRequest) -> SyncResponse:
             baseline_gaze_std=session.baseline.gaze_deviation.std_dev,
             baseline_audio_mean=session.baseline.audio_level.mean,
             baseline_audio_std=session.baseline.audio_level.std_dev,
+            speech_detected=speech_detected,
             objects=all_objects,
             last_event_times=session.last_event_times,
             current_timestamp=current_ts,
         )
         new_events = [Event(**e) for e in detected_dicts]
         session.events.extend(new_events)
+
+    if (
+        session.webhook_url
+        and (current_ts - session.last_webhook_sent_at) >= WEBHOOK_INTERVAL_SECONDS
+    ):
+        webhook_payload = {
+            "session_id": session.session_id,
+            "integrity": 100,  # Placeholder until Sprint 6
+            "attentiveness": 100,  # Placeholder until Sprint 6
+            "environment": 100,  # Placeholder until Sprint 6
+            "events": [e.dict() for e in new_events],
+            "latest_events": [e.dict() for e in new_events],
+        }
+        background_tasks.add_task(post_webhook, session.webhook_url, webhook_payload)
+        session.last_webhook_sent_at = current_ts
 
     return SyncResponse(
         session_id=session.session_id,
@@ -307,6 +381,7 @@ def session_start(body: SessionStartRequest) -> SessionStartResponse:
         assessment_id=body.assessment_id,
         proctoring_token=proctoring_token,
         expires_at=expires_at,
+        webhook_url=body.webhook_url,
     )
     return SessionStartResponse(
         session_id=session_id,
@@ -339,4 +414,33 @@ def list_sessions() -> AdminSessionsResponse:
 
 @app.get("/api/admin/sessions/{session_id}", response_model=SessionRecord)
 def get_session(session_id: str) -> SessionRecord:
-    return get_or_create_session(session_id)
+    return get_existing_session_or_404(session_id)
+
+@app.post("/api/calibrate", response_model=CalibrationResponse)
+def calibrate(session_id: str, body: CalibrationMap) -> CalibrationResponse:
+    session = get_or_create_session(session_id)
+
+    # Retry limit
+    if session.calibration_attempts >= 3:
+        return CalibrationResponse(
+            valid=False,
+            reason="Maximum attempts reached. Contact administrator."
+        )
+    session.calibration_attempts += 1
+
+    # Removed strict range validation:
+    # If the candidate only moves their eyes and not their head, their raw head-pose range
+    # will be very small (e.g. < 5.0). By capturing this small range, the frontend
+    # correctly sets a tight threshold for their specific behavior.
+
+    # Validate sample count
+    if body.sampleCount < 15:
+        return CalibrationResponse(
+            valid=False,
+            reason="Not enough tracking data. Ensure good lighting and face the camera."
+        )
+
+    # All checks passed
+    session.calibration_map = body.dict()
+    session.calibration_complete = True
+    return CalibrationResponse(valid=True, reason="Calibration successful.")
